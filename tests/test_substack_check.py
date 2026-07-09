@@ -143,6 +143,14 @@ class TestSubscriberAudit(unittest.TestCase):
         self.assertEqual(
             reasons, ["duplicate", "email_disabled", "malformed_email", "malformed_email"]
         )
+        # Excluded CSV must contain raw (unredacted) emails for human review
+        emails = {r["email"] for r in rows}
+        self.assertIn("dave@example.com", emails)       # disabled row, raw
+        self.assertIn("carol@example.com", emails)      # losing duplicate, raw
+        self.assertIn("not-an-email.example.com", emails)  # malformed, raw
+        for r in rows:
+            self.assertNotIn("***", r["email"])         # never redacted here
+        self.assertEqual(rows[0]["file"], "email_list.testpub.csv")
 
     def test_cross_file_duplicate_merge(self):
         from make_fixture import build_split_lists
