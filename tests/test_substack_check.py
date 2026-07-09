@@ -153,6 +153,16 @@ class TestSubscriberAudit(unittest.TestCase):
             self.assertNotIn("***", r["email"])         # never redacted here
         self.assertEqual(rows[0]["file"], "email_list.testpub.csv")
 
+    def test_plan_other_classification(self):
+        # Real exports mark free subscribers as plan='other' with an inactive
+        # subscription; 'other' with any unrecognized subscription stays unknown.
+        free = {"active_subscription": "false", "plan": "other"}
+        self.assertEqual(sc.classify_paid(free)[0], "free")
+        active = {"active_subscription": "true", "plan": "other"}
+        self.assertEqual(sc.classify_paid(active)[0], "paid")
+        odd = {"active_subscription": "trial_state", "plan": "other"}
+        self.assertEqual(sc.classify_paid(odd)[0], "unknown")
+
     def test_cross_file_duplicate_merge(self):
         from make_fixture import build_split_lists
         path = build_split_lists(os.path.join(self.tmp.name, "split.zip"))

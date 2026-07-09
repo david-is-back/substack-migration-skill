@@ -30,7 +30,9 @@ EMBED_RE = re.compile(r"class=[\"'][^\"']*(?:embed|tweet|youtube)[^\"']*[\"']")
 TRUEISH = {"true", "t", "yes", "1", "active"}
 FALSISH = {"false", "f", "no", "0", "", "none", "inactive"}
 PAID_PLANS = {"monthly", "month", "annually", "annual", "yearly", "year", "founding"}
-FREE_PLANS = {"", "free", "none", "null"}
+# "other" observed in real exports (2026-07) on free subscribers; classified
+# free only when active_subscription is also falsish (see classify_paid).
+FREE_PLANS = {"", "free", "none", "null", "other"}
 
 CLEANED_HEADER = [
     "email", "name", "status", "is_paid", "subscription_status",
