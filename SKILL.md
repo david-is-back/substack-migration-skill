@@ -21,8 +21,8 @@ Python 3.9+ — do not analyze the export inline.
 
 1. **Locate the ZIP.** If the user did not give a path, ask for it. Do not
    unzip it; the script reads it in place.
-2. **Check Python**: run `python --version` (or `python3`). Needs 3.9+.
-   Needs Python 3.9+; if 'python' reports Python 2, use 'python3'.
+2. **Check Python**: run `python --version` (or `python3`). Needs 3.9+;
+   if `python` reports Python 2, use `python3`.
 3. **Run the audit:**
    `python <skill-dir>/scripts/substack_check.py <zip-path>`
    Optional: `--out <dir>` (default: `migration-check/` next to the ZIP,
