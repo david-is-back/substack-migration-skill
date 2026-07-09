@@ -1,4 +1,5 @@
 import os
+import struct
 import sys
 import tempfile
 import unittest
@@ -263,6 +264,116 @@ class TestAssemblyAndCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         payload = json_mod.loads(proc.stdout)
         self.assertEqual(payload["error"], "not_a_substack_export")
+
+
+def _corrupt_first_deflated_member(zip_path):
+    """Flip a run of bytes inside the first member's compressed data,
+    strictly between its local-file-header data and the next signature
+    (next local header or the central directory), so the end-of-central-
+    directory record is left untouched."""
+    with open(zip_path, "rb") as fh:
+        data = bytearray(fh.read())
+    sig = b"PK\x03\x04"
+    start = data.find(sig)
+    assert start != -1, "no local file header found"
+    name_len, extra_len = struct.unpack("<HH", data[start + 26:start + 30])
+    data_start = start + 30 + name_len + extra_len
+    candidates = [
+        pos for pos in (
+            data.find(b"PK\x03\x04", data_start),
+            data.find(b"PK\x01\x02", data_start),
+        ) if pos != -1
+    ]
+    data_end = min(candidates) if candidates else len(data)
+    assert data_end > data_start, "no compressed data to corrupt"
+    flip_start = data_start + max(1, (data_end - data_start) // 4)
+    flip_len = min(8, data_end - flip_start)
+    assert flip_len > 0, "corruption window too small"
+    for i in range(flip_start, flip_start + flip_len):
+        data[i] ^= 0xFF
+    with open(zip_path, "wb") as fh:
+        fh.write(bytes(data))
+
+
+class TestErrorPaths(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_corrupt_zip_member_exits_audit_failed(self):
+        path = build_full_export(os.path.join(self.tmp.name, "full.zip"))
+        _corrupt_first_deflated_member(path)
+        result, code = sc.run(path, out_dir=os.path.join(self.tmp.name, "out"))
+        self.assertEqual(code, sc.EXIT_AUDIT_FAILED)
+        self.assertEqual(result["error"], "audit_failed")
+        self.assertIn("detail", result)
+        self.assertIn("expected", result)
+
+    def test_non_utf8_email_list_exits_audit_failed(self):
+        path = os.path.join(self.tmp.name, "badenc.zip")
+        raw = (
+            b"email,active_subscription,expiry,plan,email_disabled,"
+            b"created_at,first_payment_at\n"
+            b"caf\xe9@example.com,false,,,false,2024-01-01,\n"
+        )
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("email_list.testpub.csv", raw)
+        result, code = sc.run(path, out_dir=os.path.join(self.tmp.name, "out"))
+        self.assertEqual(code, sc.EXIT_AUDIT_FAILED)
+        self.assertEqual(result["error"], "audit_failed")
+
+    def test_unknown_plan_evidence_is_sanitized(self):
+        path = os.path.join(self.tmp.name, "leak.zip")
+        csv_text = (
+            "email,active_subscription,expiry,plan,email_disabled,"
+            "created_at,first_payment_at\n"
+            "x@example.com,secret.person@private.example,,weird_plan,"
+            "false,2024-01-01,\n"
+        )
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("email_list.testpub.csv", csv_text)
+        result, code = sc.run(path, out_dir=os.path.join(self.tmp.name, "out"))
+        self.assertEqual(code, sc.EXIT_OK)
+        section = result["sections"]["subscribers"]
+        self.assertEqual(sum(section["unknown_plan_values"].values()), 1)
+        dumped = json_mod.dumps(result)
+        self.assertNotIn("secret.person@private.example", dumped)
+
+    def test_row_loss_detected_and_warned(self):
+        path = os.path.join(self.tmp.name, "unbalanced.zip")
+        csv_text = (
+            "email,active_subscription,expiry,plan,email_disabled,"
+            "created_at,first_payment_at\n"
+            '"unterminated,false,,,false,2024-01-01,\n'
+            "carol@example.com,false,,,false,2024-01-02,\n"
+            "dave@example.com,false,,,false,2024-01-03,\n"
+        )
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("email_list.testpub.csv", csv_text)
+        result, code = sc.run(path, out_dir=os.path.join(self.tmp.name, "out"))
+        self.assertEqual(code, sc.EXIT_OK)
+        section = result["sections"]["subscribers"]
+        self.assertTrue(section["parse_warnings"])
+        for warning in section["parse_warnings"]:
+            self.assertIn(warning, result["warnings"])
+
+    def test_bom_prefixed_email_list_parses_normally(self):
+        path = os.path.join(self.tmp.name, "bom.zip")
+        csv_text = (
+            "﻿email,active_subscription,expiry,plan,email_disabled,"
+            "created_at,first_payment_at\n"
+            "alice@example.com,false,,,false,2024-01-01,\n"
+            "bob@example.com,true,2026-01-01,monthly,false,2024-01-02,\n"
+        )
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("email_list.testpub.csv", csv_text)
+        result, code = sc.run(path, out_dir=os.path.join(self.tmp.name, "out"))
+        self.assertEqual(code, sc.EXIT_OK)
+        section = result["sections"]["subscribers"]
+        self.assertEqual(section["total_rows"], 2)
+        self.assertEqual(section["parse_warnings"], [])
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ import zipfile
 
 EXIT_OK = 0
 EXIT_NOT_AN_EXPORT = 2
+EXIT_AUDIT_FAILED = 3
 
 EMAIL_LIST_RE = re.compile(r"^email_list[\w.-]*\.csv$")
 POST_HTML_RE = re.compile(r"^posts/(?P<post_id>[^.]+)\..*html$")
@@ -104,6 +105,13 @@ def redact_email(email):
     return (local[:1] or "?") + "***@" + domain
 
 
+def _sanitize_value(value):
+    """Redact email-like values and truncate; evidence strings reach model-visible JSON."""
+    if EMAIL_RE.match(value):
+        return redact_email(value)
+    return value[:40]
+
+
 def classify_paid(row):
     """Fail-loud paid detection: unrecognized values are 'unknown', never free."""
     sub = (row.get("active_subscription") or "").strip().lower()
@@ -112,7 +120,9 @@ def classify_paid(row):
         return "paid", plan or sub
     if sub in FALSISH and plan in FREE_PLANS:
         return "free", ""
-    return "unknown", "active_subscription=%r plan=%r" % (sub, plan)
+    return "unknown", "active_subscription=%r plan=%r" % (
+        _sanitize_value(sub), _sanitize_value(plan)
+    )
 
 
 def audit_subscribers(zf, components):
@@ -120,9 +130,14 @@ def audit_subscribers(zf, components):
     excluded = []   # {"email": redacted, "raw_email": str, "reason": str, "file": str}
     unknown_values = {}
     total = 0
+    parse_warnings = []
 
     for name in components["email_lists"]:
-        for row in csv.DictReader(io.StringIO(read_text(zf, name))):
+        text = read_text(zf, name)
+        physical = sum(1 for line in text.splitlines()[1:] if line.strip())
+        parsed = 0
+        for row in csv.DictReader(io.StringIO(text)):
+            parsed += 1
             total += 1
             email = (row.get("email") or "").strip()
             if not EMAIL_RE.match(email):
@@ -163,6 +178,13 @@ def audit_subscribers(zf, components):
             else:
                 kept[key] = record
 
+        if parsed != physical:
+            parse_warnings.append(
+                "%s: parsed %d of %d non-empty data lines - check for unbalanced "
+                "quotes; some subscribers may be missing from the cleaned CSV"
+                % (name, parsed, physical)
+            )
+
     reasons = {}
     for entry in excluded:
         reasons[entry["reason"]] = reasons.get(entry["reason"], 0) + 1
@@ -187,6 +209,7 @@ def audit_subscribers(zf, components):
             {"email": e["email"], "reason": e["reason"]} for e in excluded[:5]
         ],
         "unsubscribe_note": UNSUBSCRIBE_NOTE,
+        "parse_warnings": parse_warnings,
     }
     cleaned = [
         {k: v for k, v in r.items() if not k.startswith("_")}
@@ -302,60 +325,71 @@ def run(zip_path, out_dir=None):
              "zip": os.path.abspath(zip_path)},
             EXIT_NOT_AN_EXPORT,
         )
-    with zipfile.ZipFile(zip_path) as zf:
-        components = detect_components(zf)
-        if not (components["email_lists"] or components["posts_csv"]
-                or components["post_html"]):
-            return (
-                {"error": "not_a_substack_export", "expected": EXPECTED_MSG,
-                 "zip": os.path.abspath(zip_path)},
-                EXIT_NOT_AN_EXPORT,
-            )
-        result = {
-            "zip": os.path.abspath(zip_path),
-            "sections": {},
-            "artifacts": [],
-            "warnings": [],
-        }
-        result["sections"]["export_integrity"] = check_integrity(zf, components)
-        out = pick_out_dir(zip_path, out_dir)
-        result["out_dir"] = out
-
-        if components["email_lists"]:
-            section, cleaned, excluded = audit_subscribers(zf, components)
-            result["sections"]["subscribers"] = section
-            cleaned_path = os.path.join(out, "subscribers-cleaned.csv")
-            write_csv(cleaned_path, CLEANED_HEADER, cleaned)
-            result["artifacts"].append(cleaned_path)
-            excluded_path = os.path.join(out, "subscribers-excluded.csv")
-            write_csv(
-                excluded_path, EXCLUDED_HEADER,
-                [{"email": e["raw_email"], "reason": e["reason"], "file": e["file"]}
-                 for e in excluded],
-            )
-            result["artifacts"].append(excluded_path)
-            if section["paid"] > 0:
-                result["warnings"].append(
-                    "Paid subscribers detected. The export does not include billing "
-                    "data - review your Stripe account and the paid-migration guide: "
-                    "https://github.com/david-is-back/substack-migration-checklist/"
-                    "blob/main/guides/migrate-paid-subscribers.md"
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            components = detect_components(zf)
+            if not (components["email_lists"] or components["posts_csv"]
+                    or components["post_html"]):
+                return (
+                    {"error": "not_a_substack_export", "expected": EXPECTED_MSG,
+                     "zip": os.path.abspath(zip_path)},
+                    EXIT_NOT_AN_EXPORT,
                 )
-        else:
-            result["sections"]["subscribers"] = {
-                "status": "skipped", "reason": "no email_list*.csv in export"
+            result = {
+                "zip": os.path.abspath(zip_path),
+                "sections": {},
+                "artifacts": [],
+                "warnings": [],
             }
+            result["sections"]["export_integrity"] = check_integrity(zf, components)
+            out = pick_out_dir(zip_path, out_dir)
+            result["out_dir"] = out
 
-        if components["posts_csv"] or components["post_html"]:
-            post_section, inventory = audit_posts(zf, components)
-            result["sections"]["posts"] = post_section
-            inventory_path = os.path.join(out, "posts-inventory.csv")
-            write_csv(inventory_path, INVENTORY_HEADER, inventory)
-            result["artifacts"].append(inventory_path)
-        else:
-            result["sections"]["posts"] = {
-                "status": "skipped", "reason": "no posts.csv or posts/*.html in export"
-            }
+            if components["email_lists"]:
+                section, cleaned, excluded = audit_subscribers(zf, components)
+                result["sections"]["subscribers"] = section
+                result["warnings"].extend(section["parse_warnings"])
+                cleaned_path = os.path.join(out, "subscribers-cleaned.csv")
+                write_csv(cleaned_path, CLEANED_HEADER, cleaned)
+                result["artifacts"].append(cleaned_path)
+                excluded_path = os.path.join(out, "subscribers-excluded.csv")
+                write_csv(
+                    excluded_path, EXCLUDED_HEADER,
+                    [{"email": e["raw_email"], "reason": e["reason"], "file": e["file"]}
+                     for e in excluded],
+                )
+                result["artifacts"].append(excluded_path)
+                if section["paid"] > 0:
+                    result["warnings"].append(
+                        "Paid subscribers detected. The export does not include billing "
+                        "data - review your Stripe account and the paid-migration guide: "
+                        "https://github.com/david-is-back/substack-migration-checklist/"
+                        "blob/main/guides/migrate-paid-subscribers.md"
+                    )
+            else:
+                result["sections"]["subscribers"] = {
+                    "status": "skipped", "reason": "no email_list*.csv in export"
+                }
+
+            if components["posts_csv"] or components["post_html"]:
+                post_section, inventory = audit_posts(zf, components)
+                result["sections"]["posts"] = post_section
+                inventory_path = os.path.join(out, "posts-inventory.csv")
+                write_csv(inventory_path, INVENTORY_HEADER, inventory)
+                result["artifacts"].append(inventory_path)
+            else:
+                result["sections"]["posts"] = {
+                    "status": "skipped",
+                    "reason": "no posts.csv or posts/*.html in export",
+                }
+    except Exception as exc:
+        return (
+            {"error": "audit_failed",
+             "detail": "%s: %s" % (type(exc).__name__, exc),
+             "zip": os.path.abspath(zip_path),
+             "expected": EXPECTED_MSG},
+            EXIT_AUDIT_FAILED,
+        )
 
     result["tables_markdown"] = render_tables(result)
     return result, EXIT_OK
