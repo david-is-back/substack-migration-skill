@@ -691,7 +691,7 @@ Then modify `run()`: after the `export_integrity` line and still inside the `wit
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m unittest discover -s tests -v`
-Expected: `Ran 14 tests ... OK`
+Expected: `Ran 13 tests ... OK`
 
 - [ ] **Step 5: Commit**
 
@@ -843,7 +843,7 @@ Wire into `run()`, after the subscribers block (inside the `with` block):
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m unittest discover -s tests -v`
-Expected: `Ran 17 tests ... OK`
+Expected: `Ran 16 tests ... OK`
 
 - [ ] **Step 5: Commit**
 
@@ -981,7 +981,7 @@ In `run()`, add as the last line before `return result, EXIT_OK` (outside the `w
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m unittest discover -s tests -v`
-Expected: `Ran 22 tests ... OK`
+Expected: `Ran 21 tests ... OK`
 
 - [ ] **Step 5: Commit**
 
@@ -1186,7 +1186,7 @@ MIT licensed. Issues and PRs welcome.
 
 - [ ] **Step 3: Verify**
 
-Run: `python -m unittest discover -s tests -v` (still `Ran 22 tests ... OK` — docs must not break anything).
+Run: `python -m unittest discover -s tests -v` (still `Ran 21 tests ... OK` — docs must not break anything).
 Check `SKILL.md` frontmatter: `name` matches `substack-migration-check`; description contains the trigger phrases "migrate", "Substack export", "check", "clean".
 
 - [ ] **Step 4: Commit**
@@ -1210,7 +1210,7 @@ git commit -m "docs: SKILL.md orchestration flow and README"
 - [ ] **Step 1: Full test suite**
 
 Run: `python -m unittest discover -s tests -v`
-Expected: `Ran 22 tests ... OK`
+Expected: `Ran 21 tests ... OK`
 
 - [ ] **Step 2: Smoke test on a real export (local only — do not commit outputs)**
 
