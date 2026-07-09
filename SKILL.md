@@ -34,6 +34,8 @@ Python 3.9+ — do not analyze the export inline.
    - Executive summary (2-4 sentences: is this export ready to migrate?).
    - One section per check: embed the matching `tables_markdown` table
      **verbatim — never retype numbers** — plus a short interpretation.
+     (`tables_markdown` has entries only for `subscribers` and `posts`;
+     summarize `export_integrity` from its section keys instead.)
    - Every warning from `warnings`, prominently.
    - The known limitations and the "Still manual" section condensed from
      `references/checklist-map.md`, with its links.
