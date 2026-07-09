@@ -33,6 +33,15 @@ aggregate counts and redacted samples (`a***@example.com`). No network access.
 
 ## Install
 
+As a plugin (recommended — gets updates through the plugin system):
+
+```
+/plugin marketplace add david-is-back/substack-migration-skill
+/plugin install substack-migration-check@substack-migration-check
+```
+
+Or as a personal skill:
+
 ```bash
 git clone https://github.com/david-is-back/substack-migration-skill ~/.claude/skills/substack-migration-check
 ```

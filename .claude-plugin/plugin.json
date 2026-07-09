@@ -1,0 +1,12 @@
+{
+  "name": "substack-migration-check",
+  "description": "Audit a Substack export ZIP before migrating to another newsletter platform. Produces a report, a cleaned import-ready subscriber CSV, and a post dependency inventory - fully offline.",
+  "version": "0.1.2",
+  "author": {
+    "name": "David Orellana"
+  },
+  "homepage": "https://github.com/david-is-back/substack-migration-skill",
+  "repository": "https://github.com/david-is-back/substack-migration-skill",
+  "license": "MIT",
+  "keywords": ["substack", "newsletter", "migration", "export", "audit"]
+}
