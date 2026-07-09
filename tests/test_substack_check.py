@@ -210,5 +210,60 @@ class TestPostAudit(unittest.TestCase):
         self.assertEqual(rows["999999"]["has_html"], "True")
 
 
+import json as json_mod
+import subprocess
+
+SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "substack_check.py")
+
+
+class TestAssemblyAndCli(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_partial_export_skips_posts(self):
+        path = build_subscribers_only(os.path.join(self.tmp.name, "subs.zip"))
+        result, code = sc.run(path, out_dir=os.path.join(self.tmp.name, "out"))
+        self.assertEqual(code, sc.EXIT_OK)
+        self.assertEqual(result["sections"]["subscribers"]["status"], "ran")
+        self.assertEqual(result["sections"]["posts"]["status"], "skipped")
+
+    def test_tables_markdown_present_and_exact(self):
+        path = build_full_export(os.path.join(self.tmp.name, "full.zip"))
+        result, _ = sc.run(path, out_dir=os.path.join(self.tmp.name, "out"))
+        tables = result["tables_markdown"]
+        self.assertIn("| Importable (cleaned) | 5 |", tables["subscribers"])
+        self.assertIn("| Total posts | 4 |", tables["posts"])
+
+    def test_out_dir_collision_suffixes(self):
+        path = build_full_export(os.path.join(self.tmp.name, "full.zip"))
+        default_out = os.path.join(self.tmp.name, "migration-check")
+        os.makedirs(default_out)
+        result, _ = sc.run(path)  # no out_dir -> default next to ZIP, which exists
+        self.assertTrue(result["out_dir"].endswith("migration-check-2"))
+
+    def test_cli_end_to_end(self):
+        path = build_full_export(os.path.join(self.tmp.name, "full.zip"))
+        proc = subprocess.run(
+            [sys.executable, SCRIPT, path,
+             "--out", os.path.join(self.tmp.name, "cli-out")],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0)
+        payload = json_mod.loads(proc.stdout)
+        self.assertEqual(payload["sections"]["subscribers"]["importable"], 5)
+
+    def test_cli_not_an_export_exit_2(self):
+        path = build_not_an_export(os.path.join(self.tmp.name, "other.zip"))
+        proc = subprocess.run(
+            [sys.executable, SCRIPT, path], capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 2)
+        payload = json_mod.loads(proc.stdout)
+        self.assertEqual(payload["error"], "not_a_substack_export")
+
+
 if __name__ == "__main__":
     unittest.main()

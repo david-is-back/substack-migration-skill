@@ -259,6 +259,42 @@ def write_csv(path, header, rows):
             writer.writerow(row)
 
 
+def render_tables(result):
+    tables = {}
+    subs = result["sections"].get("subscribers")
+    if subs and subs.get("status") == "ran":
+        lines = [
+            "| Metric | Count |", "|---|---|",
+            "| Total rows in export | %d |" % subs["total_rows"],
+            "| Importable (cleaned) | %d |" % subs["importable"],
+            "| Excluded | %d |" % subs["excluded_total"],
+        ]
+        for reason, count in sorted(subs["excluded_by_reason"].items()):
+            lines.append("| — excluded: %s | %d |" % (reason, count))
+        lines += [
+            "| Paid | %d |" % subs["paid"],
+            "| Free | %d |" % subs["free"],
+            "| Unknown plan values | %d |" % sum(subs["unknown_plan_values"].values()),
+            "| Paid missing expiry | %d |" % subs["paid_missing_expiry"],
+            "| created_at unparseable | %d |" % subs["created_at_unparseable"],
+        ]
+        tables["subscribers"] = "\n".join(lines)
+    posts = result["sections"].get("posts")
+    if posts and posts.get("status") == "ran":
+        tables["posts"] = "\n".join([
+            "| Metric | Count |", "|---|---|",
+            "| Total posts | %d |" % posts["total"],
+            "| Published | %d |" % posts["published"],
+            "| Drafts | %d |" % posts["drafts"],
+            "| Paywalled (only_paid) | %d |" % posts["paywalled"],
+            "| Missing title | %d |" % posts["missing_title"],
+            "| Images on Substack CDN | %d |" % posts["cdn_images_total"],
+            "| Links to substack.com | %d |" % posts["substack_links_total"],
+            "| Embeds | %d |" % posts["embeds_total"],
+        ])
+    return tables
+
+
 def run(zip_path, out_dir=None):
     if not zipfile.is_zipfile(zip_path):
         return (
@@ -321,6 +357,7 @@ def run(zip_path, out_dir=None):
                 "status": "skipped", "reason": "no posts.csv or posts/*.html in export"
             }
 
+    result["tables_markdown"] = render_tables(result)
     return result, EXIT_OK
 
 
