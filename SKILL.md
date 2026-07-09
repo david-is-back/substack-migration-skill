@@ -22,6 +22,7 @@ Python 3.9+ — do not analyze the export inline.
 1. **Locate the ZIP.** If the user did not give a path, ask for it. Do not
    unzip it; the script reads it in place.
 2. **Check Python**: run `python --version` (or `python3`). Needs 3.9+.
+   Needs Python 3.9+; if 'python' reports Python 2, use 'python3'.
 3. **Run the audit:**
    `python <skill-dir>/scripts/substack_check.py <zip-path>`
    Optional: `--out <dir>` (default: `migration-check/` next to the ZIP,
@@ -30,6 +31,8 @@ Python 3.9+ — do not analyze the export inline.
    - Exit 2 → not a Substack export. Relay `expected` to the user.
    - Exit 0 → read `sections` (each `ran` or `skipped`), `warnings`,
      `artifacts`, `tables_markdown`.
+   - Any other exit code or missing JSON -> relay the error to the user and
+     stop; never open or inspect the export files yourself.
 5. **Write `report.md`** in the output directory (`out_dir` in the JSON):
    - Executive summary (2-4 sentences: is this export ready to migrate?).
    - One section per check: embed the matching `tables_markdown` table

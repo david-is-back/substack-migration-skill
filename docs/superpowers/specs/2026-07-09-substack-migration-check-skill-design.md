@@ -82,7 +82,8 @@ Single stdlib-only script (`zipfile`, `csv`, `html.parser`, `re`, `json`, `argpa
   every check whose inputs are present and lists the rest as `skipped` in the JSON/report.
 - Exit codes: `0` at least one check section ran (issues or not, reported in JSON), `2` nothing
   recognizable as a Substack export / unreadable ZIP (JSON error object with what was expected
-  and a link to the export guide).
+  and a link to the export guide), `3` unexpected audit failure (e.g. a corrupt ZIP member or
+  non-UTF-8 CSV) — a JSON error object is still emitted, but artifacts may be partial.
 
 ### 2. `SKILL.md`
 
@@ -150,7 +151,7 @@ Written to `migration-check/` (original export untouched):
    | `name` | empty — not present in Substack's export |
    | `status` | `active` (rows with `email_disabled=true` are excluded, not written here) |
    | `is_paid` | `true` iff `plan`/`active_subscription` matches a recognized paid value |
-   | `subscription_status` | normalized `active_subscription` value, verbatim if unrecognized |
+   | `subscription_status` | verbatim `active_subscription` value |
    | `subscription_expires_at` | `expiry` |
    | `created_at` | `created_at` |
    | `source` | literal `substack` |

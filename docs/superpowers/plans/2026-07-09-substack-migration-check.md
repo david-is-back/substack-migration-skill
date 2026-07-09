@@ -1214,7 +1214,7 @@ Expected: `Ran 21 tests ... OK`
 
 - [ ] **Step 2: Smoke test on a real export (local only — do not commit outputs)**
 
-Run: `python scripts/substack_check.py "C:/Users/david/Downloads/YautxsKAQlqIQtQ8CgFk7Q.zip" --out "C:/Users/david/AppData/Local/Temp/claude-smoke/migration-check"`
+Run: `python scripts/substack_check.py <path-to-your-real-export>.zip --out <temp-dir>`
 Expected: exit 0; JSON reports `subscribers.total_rows` = 4, `posts.total` = 11, `cdn_images_total` = 22, non-empty `tables_markdown`. Inspect only the JSON, not the CSV artifacts (real subscriber emails).
 (Note: an earlier draft said 40 — that figure counted domain-substring occurrences, which double-counts substackcdn URLs containing a nested URL-encoded `substack-post-media` reference. The script counts whole URL matches: 22.)
 
