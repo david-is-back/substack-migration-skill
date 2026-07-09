@@ -76,8 +76,13 @@ Single stdlib-only script (`zipfile`, `csv`, `html.parser`, `re`, `json`, `argpa
 - Emits a structured JSON summary to stdout — counts, per-check results, small samples
   (max 5 example rows per issue, emails redacted to `a***@domain.com` in samples).
   **Claude only ever reads this JSON, never the raw CSVs** — protects both privacy and context.
-- Exit codes: `0` checks ran (issues or not, reported in JSON), `2` not a Substack export /
-  unreadable ZIP (JSON error object with what was expected and a link to the export guide).
+- Emits the report's **numeric tables as pre-rendered markdown inside the JSON** — Claude writes
+  the narrative around them but never transcribes numbers by hand (keeps counts exact).
+- Partial exports are valid: Substack allows exporting the subscriber CSV alone. The script runs
+  every check whose inputs are present and lists the rest as `skipped` in the JSON/report.
+- Exit codes: `0` at least one check section ran (issues or not, reported in JSON), `2` nothing
+  recognizable as a Substack export / unreadable ZIP (JSON error object with what was expected
+  and a link to the export guide).
 
 ### 2. `SKILL.md`
 
@@ -86,14 +91,17 @@ Single stdlib-only script (`zipfile`, `csv`, `html.parser`, `re`, `json`, `argpa
 - Flow: locate ZIP (ask if ambiguous) → run script → interpret JSON → write `report.md`
   (Claude-authored, from the JSON + `references/checklist-map.md`) → present summary with
   next manual steps.
-- Fallback: if Python is unavailable, Claude may analyze inline only for small exports
-  (< ~500 subscribers), stating that larger lists need Python for exact numbers.
+- Python (3.9+) is a **hard requirement**. If unavailable, the skill stops and shows install
+  instructions — no inline analysis of subscriber data, ever. Reading the raw CSV into Claude's
+  context would send subscriber emails to the model API and break the privacy promise.
 
 ### 3. `references/checklist-map.md`
 
 Maps every automated check to its checklist section (§2 export integrity, §3 subscriber list,
 §5 content archive) and condenses the non-automatable sections (§1, 4, 6, 7, 8, 9, 10) into the
 manual-steps block the report embeds, with deep links to the checklist repo's guides.
+Records the checklist repo commit hash it was generated against, so upstream changes to the
+template header or guide URLs are detectable instead of silently drifting.
 
 ## Checks
 
@@ -106,7 +114,13 @@ manual-steps block the report embeds, with deep links to the checklist repo's gu
 - Empty/malformed emails (no `@`, embedded spaces/commas, leading/trailing whitespace).
 - Case-insensitive duplicates; when duplicates differ, keep the paid row.
 - `email_disabled=true` → excluded as bounced/disabled.
-- Paid detection via `active_subscription` / `plan`; paid rows missing `expiry` flagged.
+- Paid detection via `active_subscription` / `plan`, **fail-loud**: only values the script
+  recognizes are classified; any unrecognized value goes into an `unknown_plan_values` bucket
+  in the JSON and the report (with row counts), never silently classified as free.
+  Paid rows missing `expiry` flagged.
+- Known limitation, stated in the report: Substack's export carries `email_disabled`
+  (bounces/disabled) but **no unsubscribe signal**. The report instructs the user to verify
+  the export filter in Substack so unsubscribed contacts are not imported.
 - `created_at` present and parseable.
 - Multiple `email_list.*.csv` files merged with cross-file duplicate detection.
 - Output counts: total, importable, excluded per reason.
@@ -122,11 +136,25 @@ manual-steps block the report embeds, with deep links to the checklist repo's gu
 
 Written to `migration-check/` (original export untouched):
 
-1. `report.md` — Claude-authored: executive summary, per-check results with exact counts,
-   artifact index, and the "still manual" condensed checklist with repo links.
+1. `report.md` — Claude-authored narrative around the script's pre-rendered numeric tables:
+   executive summary, per-check results, artifact index, and the "still manual" condensed
+   checklist with repo links.
 2. `subscribers-cleaned.csv` — script-generated, mapped to the checklist template header
-   `email,name,status,is_paid,subscription_status,subscription_expires_at,created_at,source,tags`,
-   UTF-8 with header row.
+   `email,name,status,is_paid,subscription_status,subscription_expires_at,created_at,source,tags`
+   (as of checklist repo commit pinned in `references/checklist-map.md`), UTF-8 with header row.
+   Explicit column derivation:
+
+   | Template column | Derivation from export |
+   |---|---|
+   | `email` | `email`, trimmed; deduplicated case-insensitively, original casing preserved |
+   | `name` | empty — not present in Substack's export |
+   | `status` | `active` (rows with `email_disabled=true` are excluded, not written here) |
+   | `is_paid` | `true` iff `plan`/`active_subscription` matches a recognized paid value |
+   | `subscription_status` | normalized `active_subscription` value, verbatim if unrecognized |
+   | `subscription_expires_at` | `expiry` |
+   | `created_at` | `created_at` |
+   | `source` | literal `substack` |
+   | `tags` | empty — not present in Substack's export |
 3. `subscribers-excluded.csv` — every excluded row with its reason, for human review.
 4. `posts-inventory.csv` — one row per post: id, title, published, paywalled,
    substack-CDN image count, substack.com link count, embed count.
@@ -149,8 +177,10 @@ Written to `migration-check/` (original export untouched):
 
 ## Distribution
 
-- Standalone public GitHub repo. README covers: what it checks, install
-  (clone/copy into `~/.claude/skills/`), usage, privacy statement (offline, no data leaves the machine).
+- Standalone public GitHub repo. README covers: what it checks, exact install command
+  (`git clone <url> ~/.claude/skills/substack-migration-check` — the target directory name must
+  match the skill name, since repo and skill are named differently), usage, Python 3.9+ requirement,
+  privacy statement (offline, no data leaves the machine).
 - The checklist repo can later add a one-line link to this repo (out of scope here).
 
 ## Future (explicitly deferred)
