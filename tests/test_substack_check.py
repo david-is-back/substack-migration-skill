@@ -172,5 +172,43 @@ class TestSubscriberAudit(unittest.TestCase):
         self.assertEqual(before, after)
 
 
+class TestPostAudit(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.zip_path = build_full_export(os.path.join(self.tmp.name, "full.zip"))
+        self.out = os.path.join(self.tmp.name, "out")
+        self.result, self.code = sc.run(self.zip_path, out_dir=self.out)
+        self.section = self.result["sections"]["posts"]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_counts(self):
+        self.assertEqual(self.section["status"], "ran")
+        self.assertEqual(self.section["total"], 4)        # 3 csv rows + 1 orphan html
+        self.assertEqual(self.section["published"], 2)
+        self.assertEqual(self.section["drafts"], 1)
+        self.assertEqual(self.section["paywalled"], 1)
+        self.assertEqual(self.section["missing_title"], 2)  # draft + orphan
+
+    def test_dependency_totals(self):
+        self.assertEqual(self.section["cdn_images_total"], 2)
+        self.assertEqual(self.section["substack_links_total"], 1)
+        self.assertEqual(self.section["embeds_total"], 1)
+
+    def test_inventory_artifact(self):
+        path = os.path.join(self.out, "posts-inventory.csv")
+        self.assertIn(path, self.result["artifacts"])
+        with open(path, encoding="utf-8", newline="") as fh:
+            rows = {r["post_id"]: r for r in csv_mod.DictReader(fh)}
+        self.assertEqual(len(rows), 4)
+        self.assertEqual(rows["100001.abc"]["cdn_images"], "2")
+        self.assertEqual(rows["100001.abc"]["substack_links"], "1")
+        self.assertEqual(rows["100001.abc"]["embeds"], "1")
+        self.assertEqual(rows["100002.def"]["paywalled"], "True")
+        self.assertEqual(rows["100003.ghi"]["has_html"], "False")
+        self.assertEqual(rows["999999"]["has_html"], "True")
+
+
 if __name__ == "__main__":
     unittest.main()

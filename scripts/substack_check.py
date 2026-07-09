@@ -21,6 +21,11 @@ EMAIL_LIST_RE = re.compile(r"^email_list[\w.-]*\.csv$")
 POST_HTML_RE = re.compile(r"^posts/(?P<post_id>[^.]+)\..*html$")
 EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+CDN_IMAGE_RE = re.compile(
+    r"https?://[^\"'\s>]*(?:substackcdn\.com|substack-post-media)[^\"'\s>]*"
+)
+SUBSTACK_LINK_RE = re.compile(r"href=[\"']https?://[^\"']*substack\.com[^\"']*[\"']")
+EMBED_RE = re.compile(r"class=[\"'][^\"']*(?:embed|tweet|youtube)[^\"']*[\"']")
 TRUEISH = {"true", "t", "yes", "1", "active"}
 FALSISH = {"false", "f", "no", "0", "", "none", "inactive"}
 PAID_PLANS = {"monthly", "month", "annually", "annual", "yearly", "year", "founding"}
@@ -31,6 +36,10 @@ CLEANED_HEADER = [
     "subscription_expires_at", "created_at", "source", "tags",
 ]
 EXCLUDED_HEADER = ["email", "reason", "file"]
+INVENTORY_HEADER = [
+    "post_id", "title", "is_published", "paywalled",
+    "cdn_images", "substack_links", "embeds", "has_html",
+]
 
 UNSUBSCRIBE_NOTE = (
     "Substack's export has no unsubscribe column (only email_disabled). "
@@ -186,6 +195,50 @@ def audit_subscribers(zf, components):
     return section, cleaned, excluded
 
 
+def audit_posts(zf, components):
+    posts = {}
+    if components["posts_csv"]:
+        for row in csv.DictReader(io.StringIO(read_text(zf, "posts.csv"))):
+            pid = (row.get("post_id") or "").split(".")[0].strip()
+            if not pid:
+                continue
+            posts[pid] = {
+                "post_id": (row.get("post_id") or "").strip(),
+                "title": (row.get("title") or "").strip(),
+                "is_published": (row.get("is_published") or "").strip().lower()
+                                in TRUEISH,
+                "paywalled": (row.get("audience") or "").strip().lower()
+                             == "only_paid",
+                "cdn_images": 0, "substack_links": 0, "embeds": 0,
+                "has_html": False,
+            }
+    for name in components["post_html"]:
+        pid = POST_HTML_RE.match(name).group("post_id")
+        html = read_text(zf, name)
+        record = posts.setdefault(pid, {
+            "post_id": pid, "title": "", "is_published": None, "paywalled": None,
+            "cdn_images": 0, "substack_links": 0, "embeds": 0, "has_html": False,
+        })
+        record["has_html"] = True
+        record["cdn_images"] = len(CDN_IMAGE_RE.findall(html))
+        record["substack_links"] = len(SUBSTACK_LINK_RE.findall(html))
+        record["embeds"] = len(EMBED_RE.findall(html))
+
+    inventory = sorted(posts.values(), key=lambda p: p["post_id"])
+    section = {
+        "status": "ran",
+        "total": len(inventory),
+        "published": sum(1 for p in inventory if p["is_published"] is True),
+        "drafts": sum(1 for p in inventory if p["is_published"] is False),
+        "paywalled": sum(1 for p in inventory if p["paywalled"]),
+        "missing_title": sum(1 for p in inventory if not p["title"]),
+        "cdn_images_total": sum(p["cdn_images"] for p in inventory),
+        "substack_links_total": sum(p["substack_links"] for p in inventory),
+        "embeds_total": sum(p["embeds"] for p in inventory),
+    }
+    return section, inventory
+
+
 def pick_out_dir(zip_path, requested):
     base = requested or os.path.join(
         os.path.dirname(os.path.abspath(zip_path)), "migration-check"
@@ -256,6 +309,18 @@ def run(zip_path, out_dir=None):
             result["sections"]["subscribers"] = {
                 "status": "skipped", "reason": "no email_list*.csv in export"
             }
+
+        if components["posts_csv"] or components["post_html"]:
+            post_section, inventory = audit_posts(zf, components)
+            result["sections"]["posts"] = post_section
+            inventory_path = os.path.join(out, "posts-inventory.csv")
+            write_csv(inventory_path, INVENTORY_HEADER, inventory)
+            result["artifacts"].append(inventory_path)
+        else:
+            result["sections"]["posts"] = {
+                "status": "skipped", "reason": "no posts.csv or posts/*.html in export"
+            }
+
     return result, EXIT_OK
 
 
